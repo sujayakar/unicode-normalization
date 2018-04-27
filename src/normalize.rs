@@ -40,7 +40,7 @@ fn decompose<F, T>(c: char, table: T, mut emit_char: F)
     }
 
     // Perform decomposition for Hangul
-    if (c as u32) >= S_BASE && (c as u32) < (S_BASE + S_COUNT) {
+    if is_hangul(c) {
         decompose_hangul(c, emit_char);
         return;
     }
@@ -75,6 +75,10 @@ const T_COUNT: u32 = 28;
 const N_COUNT: u32 = (V_COUNT * T_COUNT);
 const S_COUNT: u32 = (L_COUNT * N_COUNT);
 
+pub(crate) fn is_hangul(c: char) -> bool {
+    (c as u32) >= S_BASE && (c as u32) < (S_BASE + S_COUNT)
+}
+
 // Decompose a precomposed Hangul syllable
 #[allow(unsafe_code)]
 #[inline(always)]
@@ -93,6 +97,13 @@ fn decompose_hangul<F>(s: char, mut emit_char: F) where F: FnMut(char) {
             emit_char(char::from_u32_unchecked(T_BASE + ti));
         }
     }
+}
+
+#[inline]
+pub(crate) fn hangul_decomposition_length(s: char) -> usize {
+    let si = s as u32 - S_BASE;
+    let ti = si % T_COUNT;
+    if ti > 0 { 3 } else { 2 }
 }
 
 // Compose a pair of Hangul Jamo

@@ -73,6 +73,8 @@ class UnicodeData(object):
         print "Canonical fully decomp: %d" % (len(self.canon_fully_decomp),)
         print "Compatible fully decomp: %d" % (len(self.compat_fully_decomp),)
 
+        self.ss_leading, self.ss_trailing = self._compute_stream_safe_tables()
+
     def _fetch(self, filename):
         resp = requests.get(UCD_URL + filename)
         return resp.text
@@ -155,9 +157,20 @@ class UnicodeData(object):
         return canon_comp
 
     def _compute_fully_decomposed(self, compatible):
-        # Even though the decomposition algorithm is recursive, it is possible
-        # to precompute the recursion at table generation time with very little
-        # increase to the table size.
+        """
+        Even though the decomposition algorithm is recursive, it is possible to
+        precompute the recursion at table generation time with modest increase
+        to the table size.
+
+            Decomposition table stats:
+            Canonical decomp:  2060
+            Compatible decomp: 3662
+            Canonical fully decomp: 2060
+            Compatible fully decomp: 5722
+
+        The upshot is that the decomposition code is very simple (and easy to
+        inline) at the cost of some code size.
+        """
 
         # Constants from Unicode 9.0.0 Section 3.12 Conjoining Jamo Behavior
         # http://www.unicode.org/versions/Unicode9.0.0/ch03.pdf#M9.32468.Heading.310.Combining.Jamo.Behavior
@@ -211,9 +224,50 @@ class UnicodeData(object):
 
             decomposition = list(_decompose(char_int))
             if not (len(decomposition) == 1 and decomposition[0] == char_int):
-                fully_decomposed[hex(char_int)[2:]] = [hex(ch)[2:] for ch in decomposition]
+                to_s = lambda i: hex(i)[2:].upper().rjust(4, '0')
+                fully_decomposed[to_s(char_int)] = map(to_s, decomposition)
 
         return fully_decomposed
+
+    def _compute_stream_safe_tables(self):
+        """
+        To make a text stream-safe with the Stream-Safe Text Process (UAX15-D4),
+        we need to be able to know the number of contiguous non-starters *after*
+        applying compatibility decomposition to each character.
+
+        We can do this incrementally by computing the number of leading and
+        trailing non-starters for each character's compatibility decomposition
+        with the following rules:
+
+        1) If a character is not affected by compatibility decomposition, look
+           up its canonical combining class to find out if it's a non-starter.
+        2) All Hangul characters are starters, even under decomposition.
+        3) Otherwise, very few decomposing characters have a nonzero count
+           of leading or trailing non-starters, so store these characters
+           with their associated counts in a separate table.
+        """
+        leading_nonstarters = {}
+        trailing_nonstarters = {}
+
+        for c, decomposed in self.compat_fully_decomp.items():
+            num_leading = 0
+            for d in decomposed:
+                if d not in self.combining_classes:
+                    break
+                num_leading += 1
+
+            num_trailing = 0
+            for d in reversed(decomposed):
+                if d not in self.combining_classes:
+                    break
+                num_trailing += 1
+
+            if num_leading > 0:
+                leading_nonstarters[c] = num_leading
+            if num_trailing > 0:
+                trailing_nonstarters[c] = num_trailing
+
+        return leading_nonstarters, trailing_nonstarters
 
 def gen_combining_class(combining_classes, out):
     out.write("#[inline]\n")
@@ -294,6 +348,30 @@ def gen_combining_mark(general_category_mark, out):
     out.write("    }\n")
     out.write("}\n")
 
+def gen_stream_safe(leading, trailing, out):
+    out.write("#[inline]\n")
+    out.write("pub fn stream_safe_leading_nonstarters(c: char) -> usize {\n")
+    out.write("    match c {\n")
+
+    for char, num_leading in leading.items():
+        out.write("        '\u{%s}' => %d,\n" % (char, num_leading))
+
+    out.write("        _ => 0,\n")
+    out.write("    }\n")
+    out.write("}\n")
+    out.write("\n")
+
+    out.write("#[inline]\n")
+    out.write("pub fn stream_safe_trailing_nonstarters(c: char) -> usize {\n")
+    out.write("    match c {\n")
+
+    for char, num_trailing in trailing.items():
+        out.write("        '\u{%s}' => %d,\n" % (char, num_trailing))
+
+    out.write("        _ => 0,\n")
+    out.write("    }\n")
+    out.write("}\n")
+
 def gen_tests(tests, out):
     out.write("""#[derive(Debug)]
 pub struct NormalizationTest {
@@ -347,6 +425,9 @@ if __name__ == '__main__':
         out.write("\n")
 
         gen_nfd_qc(data.norm_props, out)
+        out.write("\n")
+
+        gen_stream_safe(data.ss_leading, data.ss_trailing, out)
         out.write("\n")
 
     with open("normalization_tests.rs", "w") as out:
