@@ -7,9 +7,9 @@ use tables;
 const MAX_NONSTARTERS: usize = 30;
 const COMBINING_GRAPHEME_JOINER: char = '\u{034F}';
 
-// UAX15-D4: This iterator keeps track of how many non-starters there have been
-// since the last starter in *NFKD* and will emit a Combining Grapheme Joiner
-// (U+034F) if the count exceeds 30.
+/// UAX15-D4: This iterator keeps track of how many non-starters there have been
+/// since the last starter in *NFKD* and will emit a Combining Grapheme Joiner
+/// (U+034F) if the count exceeds 30.
 pub struct StreamSafe<I> {
     iter: I,
     nonstarter_count: usize,
@@ -17,7 +17,7 @@ pub struct StreamSafe<I> {
 }
 
 impl<I> StreamSafe<I> {
-    pub fn new(iter: I) -> Self {
+    pub(crate) fn new(iter: I) -> Self {
         Self { iter, nonstarter_count: 0, buffer: None }
     }
 }

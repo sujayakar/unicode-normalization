@@ -1,4 +1,5 @@
 // @generated, do not edit
+#![allow(missing_docs)]
 use quick_check::IsNormalized;
 use quick_check::IsNormalized::*;
 
@@ -13157,4 +13158,3 @@ pub fn stream_safe_trailing_nonstarters(c: char) -> usize {
         _ => 0,
     }
 }
-
